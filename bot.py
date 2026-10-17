@@ -1,8 +1,9 @@
 import time
-import google
+#import google
 import sqlite3
 import json
 from instagrapi import Client
+import os
 
 def init_db():
     pass #initialize database if not already initialized
@@ -41,3 +42,16 @@ def time_manager():
 
 def terrorist_brain():
     pass #the logic of the bot where it coordinates everything, receive/send all the parameters to the AI and sends the message
+
+#Login system for instagram client
+IG_USERNAME = input()
+IG_PASSWORD = input()
+
+IG_cl = Client()
+IG_session = "session.json"
+
+if os.path.exists(IG_session):
+    IG_cl.load_settings(IG_session)
+
+IG_cl.login(IG_USERNAME, IG_PASSWORD)
+IG_cl.dump_settings("session.json")
