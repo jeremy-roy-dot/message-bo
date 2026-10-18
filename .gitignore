@@ -1,1 +1,4 @@
-session.json
+.venv/
+config.json
+app.db
+__pycache__/
