@@ -1,4 +1,7 @@
 .venv/
+.venv
+.env
+.env/
 config.json
 app.db
 __pycache__/
