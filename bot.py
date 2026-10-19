@@ -8,7 +8,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from google import genai
 from google.genai.errors import APIError
 from instagrapi import Client
-from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError
+from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError, TwoFactorRequired, ChallengeError, ChallengeUnknownStep, ChallengeSelfieCaptcha, RecaptchaChallengeForm, ClientError
+from instagrapi.mixins.challenge import ChallengeChoice
 
 #Initialize the database for the first time, if you later modify the tables, it will check and add them
 def init_db() -> bool:
@@ -84,8 +85,8 @@ def load_ai () -> bool:
         return False
 
 #Saves the sessions.json file from the instagrapi client to the database of the user
-def session_saving (cl, username) -> bool:
-    
+def session_logging (username) -> bool:
+    cl = Client()
     session_bytes = json.dumps(cl.get_settings()).encode()
     nonce = os.urandom(12)
     ciphertext = aesgcm.encrypt(nonce, session_bytes, username.encode)
@@ -105,7 +106,7 @@ def session_saving (cl, username) -> bool:
     return True
 
 #Loads the session data from the database into the instagrapi client
-def session_loading (cl, username) -> bool:
+def session_recupering (username):
 
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
@@ -118,130 +119,61 @@ def session_loading (cl, username) -> bool:
         row = cursor.fetchone()
 
         session_dict = json.loads(str(aesgcm.decrypt(row[0], row[1], username.encode()).decode()))
-
-        cl.set_settings(session_dict)
     connection.close()
-    return True
+    return session_dict
 
 #Log the user in, will need to be used in the instagrapi full client loading logic later
-def user_login() -> bool:
+def instagrapi_login (username, password) -> bool:
+    cl = Client()
+    cl.challenge_code_handler = challenge_code_handler
 
-    print("Please Login")
-    IG_USERNAME = input("Enter your username: ")
-    IG_PASSWORD = input("Enter your password: ", echo_char="*")
+    try: #to login
+        cl.login(username, password)
+        print("You're logged in!")
+    except TwoFactorRequired:
+        print("2FA triggered")
+        twoFA_code = input("Input you code from your authentificator app: ").strip()
+        if cl.login(username, password, verification_code=twoFA_code):
+            print("You are logged in!")
+            return True
+        else:
+            print("There's been an issue, please restart")
+            return False
 
-    ph = PasswordHasher()
-
-    try:
-        with sqlite3.connect("app.db") as connection:    
-            cursor = connection.cursor()
-
-            cursor.execute("SELECT password_hash FROM users WHERE username = ?", [IG_USERNAME])
-            row = cursor.fetchone()
-
-            if row is None:
-                return False #wrong username
-
-            stored_hash = row[0]
-
-            ph.verify(stored_hash, IG_PASSWORD)
-        
-    except VerifyMismatchError:
-        return False #wrong password
-
-    finally:
-        connection.close()
-        return True #grant access to session
-
-#Adds the user to the database and should be used to initialize the session, to use in full instagrapi client initialization later
-def user_signup () -> bool: 
-
-    print("Please signup")
-    IG_USERNAME = input("Enter your username: ")
-    IG_PASSWORD = input("Enter your password: ")
-
-    IG_cl = Client()
+#Loads back the session if it exists
+def instagrapi_backin (username, password) -> bool:
+    cl = Client() 
+    session_data = session_recupering(username)
+    cl.load_settings(session_data)
 
     try:
-        IG_cl.login("username", "password")
-        print("You are logged in to your instagram account")
+        cl.get_timeline_feed()
+        print("You are logged in")
+        return True
+    
+    except LoginRequired: #session is expired
+        old_settings = cl.get_settings()
+        cl.set_settings({})
+        cl.set_uuids(old_settings["uuids"])
+        cl.set_device(old_settings["device_settings"])
+        cl.set_user_agent(old_settings["user_agent"])
+        if not instagrapi_login(username, password):
+            print("Stopping program")
+            exit()
+        if not (session_logging(username) == True):
+            print("There's been an issue, stopping program")
+        print("You are logged in")
         return True
 
-    #Wrong password
-    except BadPassword as e:
-        print(f"Error: {e}")
-        print("Either the password is wrong, or Instagram has flagged your IP address/Proxy.")
-        return False
+#Handles the code request from instagram
+def challenge_code_handler (username, choice):
+    print(f"Challenge triggered for {username}")
+    if choice == ChallengeChoice.SMS:
+        return input("Input your code received via SMS: ").strip()
+    if choice == ChallengeChoice.EMAIL:
+        return input("Input your code received via Email: ").strip()
+    return False
 
-    #Generally wrong username
-    except UnknownError as e:
-        #checks the specific error received
-        if "couldn't find an account" in str(e):
-            print("Authentication Failed: That username does not exist.")
-            return False
-        else:
-            print(f"An unexpected Instagram error occurred: {e}")
-            return False
-
-    #Code sent
-    except ChallengeRequired as e:
-        print("A verification code as been sent ")
-
-        #Get the challenge data from IG_cl.lastjson where instagrapi stores it
-        challenge_data = IG_cl.last_json
-
-        #Check where the challenge was sent
-        step_name = challenge_data.get("step_name", "")
-        step_data = challenge_data.get("step_data", {})
-
-        if "email" in step_name:
-            obscured_email = step_data.get("contact_point", "your registered email")
-            print(f"Check your inbox! A security code was sent to: {obscured_email}")
-
-        elif "sms" in step_name or "phone" in step_name:
-            obscured_phone = step_data.get("contact_point", "your registered phone number")
-            print(f"Check your texts! A security code was sent to: {obscured_phone}")
-        
-        elif "two_factor" in step_name:
-            print("2FA Active: Please generate a code from your Authenticator App.")
-        
-        else:
-            print(f"Unknown checkpoint type ({step_name}). Raw data: {challenge_data}")
-
-        verification_code = input("Enter the verification code: ").strip()
-
-        try:
-            IG_cl.challenge_resolve(verification_code)
-            print("Challenge Solved, you are now logged in")
-            return True
-
-        except ClientBadRequestError as e:
-            #Triggers when Instagram rejects the 6-digit code (400 Bad Request)
-            print(f"Verification failed: The code you provided was wrong or has expired.")
-            print(f"Raw Instagram response details: {e}")
-            return False
-
-#Login system for instagram client
-IG_USERNAME = input()
-IG_PASSWORD = input()
-
-IG_cl = Client()
-IG_session = "session.json"
-
-if os.path.exists(IG_session):
-    IG_cl.load_settings(IG_session)
-
-try: #makes sure session is not expired by requesting something
-    IG_cl.get_timeline_feed()
-
-except LoginRequired: #if it returns the error that says we are not logged in, it means the session UUID expired, so we need to store the thing we don't want to reset (device info), wipe the settings, restore the device info and relogging to get a new session
-    old_settings = IG_cl.get_settings()
-    IG_cl.set_settings({})
-    IG_cl.set_uuids(old_settings["uuids"])
-    IG_cl.set_device(old_settings["device_settings"])
-    IG_cl.set_user_agent(old_settings["user_agent"])
-    IG_cl.login(IG_USERNAME, IG_PASSWORD)
-    IG_cl.dump_settings("session.json")
 
 #App logic
 if __name__ == "__main__":
