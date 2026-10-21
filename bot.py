@@ -2,8 +2,6 @@ import time
 import os
 import json
 import sqlite3
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from google import genai
 from google.genai.errors import APIError
@@ -20,7 +18,6 @@ def init_db() -> bool:
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY AUTOINCREMENT,
             username VARCHAR(30) NOT NULL UNIQUE,
-            password VARCHAR(255),
             session_nonce BLOB,
             session_data BLOB
         );
@@ -130,6 +127,7 @@ def instagrapi_login (username, password) -> bool:
     try: #to login
         cl.login(username, password)
         print("You're logged in!")
+        return True
     except TwoFactorRequired:
         print("2FA triggered")
         twoFA_code = input("Input you code from your authentificator app: ").strip()
@@ -162,6 +160,7 @@ def instagrapi_backin (username, password) -> bool:
             exit()
         if not (session_logging(username) == True):
             print("There's been an issue, stopping program")
+            exit()
         print("You are logged in")
         return True
 
@@ -195,8 +194,83 @@ if __name__ == "__main__":
     """)
     print("Do not touch the SECRET_KEY as it is automatically generated")
     print("----------")
+
+    #Tries to load Gemini
     if load_ai():
         print("Gemini API succesfully loaded")
     else:
         print("Check error")
         exit()
+
+    #Instagrapi initiation
+    while True:
+        print("Instagrapi Initiation:")
+        print("Login to existing user [1]\nSign up with new user [2]\nClose program [3] or [ctrl + c]")
+        key = input().strip()
+        
+        #Close program
+        if key == "3":
+            print("Stopping program...")
+            exit()
+
+        #Log into an existing user
+        elif key == "1":
+            #Gets all users from the database and prints them
+            with sqlite3.connect("app.db") as connection:
+                cursor = connection.cursor()
+
+                query = "SELECT username FROM users;"
+                cursor.execute(query)
+                profiles = cursor.fetchall()
+
+                print("Select User:")
+                user_count = 1
+                #If there are no registered user, says it and goes back to the start with instagrapi initialization
+                if not profiles:
+                    print("No User exists")
+                    continue
+                for username in profiles:
+                    print(f"User: {username[0]} [{user_count}]")
+                    user_count += 1
+            connection.close()
+            print("(ctrl + c to close)")
+
+            #Requests the user to choose a user
+            while True:
+                user_number = input("Input number of the user you want: ").strip()
+                try:
+                    user_number = int(user_number)
+                    break
+                except ValueError:
+                    print("Uses a number next time.")
+                    continue
+            print(f"Success choosing user[{user_number}]: {profiles[user_number - 1][0]}")
+
+            #Requests password and tries to login, if instagrapi_backin fails, it auto closes the program
+            user_password = input("Input password: ").strip()
+            if instagrapi_backin(profiles[user_number - 1][0], user_password):
+                print(f"Successfully logged in as: {profiles[user_number - 1][0]}")
+                break
+
+        #Create a new user
+        elif key == "2":
+            print("Creating a new user: ")
+            user_name = input("Input instagram username: ").strip
+            user_password = input("Input instagram password: ").strip
+            if not instagrapi_login(user_name, user_password):
+                continue
+            #Logs the new session data into the database for a complete table
+            with sqlite3.connect("app.db") as connection:
+                cursor = connection.cursor()
+                cursor.execute("INSERT INTO users (username) VALUES (?);", (user_name,))
+            connection.close()
+            session_logging(user_name)
+            print("You are setup!")
+            break
+
+        #wrong input handling
+        else:
+            print("Please input 1, 2 or 3")
+            continue
+
+    

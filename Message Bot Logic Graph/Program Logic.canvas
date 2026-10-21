@@ -1,0 +1,16 @@
+{
+	"nodes":[
+		{"id":"2e0f0cb49c0f5238","type":"text","text":"Init Databse","x":-60,"y":-620,"width":250,"height":60},
+		{"id":"2fdfa87200810dc0","type":"text","text":"Init keys","x":-60,"y":-500,"width":250,"height":60},
+		{"id":"aab70f6fd1b98cbb","type":"text","text":"Init AI","x":-60,"y":-380,"width":250,"height":60},
+		{"id":"0c90482082442686","type":"text","text":"Choose Character","x":-60,"y":-140,"width":250,"height":60},
+		{"id":"0ceae0fb3ce1e6c2","type":"text","text":"Open terminal to choose target","x":-60,"y":-20,"width":250,"height":60},
+		{"id":"c319703adbc3d354","type":"text","text":"Resume Memories","x":-60,"y":580,"width":250,"height":60},
+		{"id":"5ac727e2d92bf9ea","type":"text","text":"Load memories","x":-60,"y":100,"width":250,"height":60},
+		{"id":"d0dbe6479ce415da","type":"text","text":"Start convo","x":-60,"y":220,"width":250,"height":60},
+		{"id":"abbf39af1e77e118","type":"text","text":"Close Convo","x":-60,"y":340,"width":250,"height":60},
+		{"id":"ec837e2c1f072ce9","type":"text","text":"Save Session","x":-60,"y":460,"width":250,"height":60},
+		{"id":"f68c9c0accee189d","type":"text","text":"Login to Instagrapi","x":-760,"y":-260,"width":250,"height":60}
+	],
+	"edges":[]
+}
