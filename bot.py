@@ -200,15 +200,14 @@ if __name__ == "__main__":
 
     #Tries to load Gemini
     if load_ai():
-        print("Gemini API succesfully loaded")
-        print("----------\n")
+        print("Gemini API succesfully loaded!")
+        print("----------")
     else:
         print("Check error above")
         exit()
 
     #Instagrapi initiation
     while True:
-        break
         print("Instagrapi Initiation:")
         print("- Login to existing user [1]\n- Sign up with new user [2]\n- Close program [3] or [ctrl + c]")
         key = input().strip()
@@ -292,3 +291,6 @@ if __name__ == "__main__":
 
         print(response.text)
         print("----------")
+
+# ToDo
+# - Separate the service of the AI and instagrapi because they need different dependencies (truly a pain)
