@@ -22,7 +22,7 @@ def init_db() -> bool:
             session_data BLOB
         );
 
-        CREATE UNIQUE INDEX idx_users_username on users(username);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username on users(username);
         """
 
         cursor.executescript(create_table_query)
@@ -38,7 +38,7 @@ def get_or_create_json_key ():
 
             data = json.load(f)
             key_hex = data["SECRET_KEY"]
-            print("Returning key")
+            print("Loaded key for AES-GCM")
             return bytes.fromhex(key_hex)
     else:
         print("No key found, making a new one")
@@ -49,7 +49,7 @@ def get_or_create_json_key ():
         with open(CONFIG_FILE, "w") as f:
             json.dump(payload, f, indent=4)
 
-        print(f"Saved new key to ./{CONFIG_FILE}")
+        print(f"Saved new key for AES-GCM to ./{CONFIG_FILE}")
         return new_key_bytes
 
 #Loads the Gemini AI client from the API key in the config file
@@ -64,6 +64,7 @@ def load_ai () -> bool:
             print("Gemini API key is missing from the config.json file, please add it")
             return False
 
+        global ai_client
         ai_client = genai.Client(api_key=gemini_key)
         print("Api key loaded succesfully")
         return True
@@ -176,13 +177,15 @@ def challenge_code_handler (username, choice):
 
 #App logic
 if __name__ == "__main__":
+    print()
+
     init_db() #Initializes Database
     CONFIG_FILE = "config.json" #Links config.json file to its variable
-
     #Manages the AES-GCM encryption key, it gets written to your config.json file
     key = get_or_create_json_key()
     aesgcm = AESGCM(key)
-
+    print()
+    
     #Load Gemini API key from the config.json file
     print("----------")
     print("If you haven't done it, you need to add your Gemini API key inside the config.json file, like this:")
@@ -193,20 +196,23 @@ if __name__ == "__main__":
     }
     """)
     print("Do not touch the SECRET_KEY as it is automatically generated")
-    print("----------")
+    print("----------\n")
 
     #Tries to load Gemini
     if load_ai():
         print("Gemini API succesfully loaded")
+        print("----------\n")
     else:
-        print("Check error")
+        print("Check error above")
         exit()
 
     #Instagrapi initiation
     while True:
+        break
         print("Instagrapi Initiation:")
-        print("Login to existing user [1]\nSign up with new user [2]\nClose program [3] or [ctrl + c]")
+        print("- Login to existing user [1]\n- Sign up with new user [2]\n- Close program [3] or [ctrl + c]")
         key = input().strip()
+        print("----------\n")
         
         #Close program
         if key == "3":
@@ -273,4 +279,16 @@ if __name__ == "__main__":
             print("Please input 1, 2 or 3")
             continue
 
-    
+    #Test loop so it doesn't close, this is just a direct messaging with gemini
+    while True:
+
+        message = input("Input your message to gemini: ")
+        print("----------")
+
+        response = ai_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=message,
+        )
+
+        print(response.text)
+        print("----------")
