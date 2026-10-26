@@ -4,24 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "d313780a3a8f1769",
+        "id": "328dd2dfbbbc9586",
         "type": "tabs",
         "children": [
           {
-            "id": "0dae9a3128092b31",
+            "id": "fe7695c4d902052e",
             "type": "leaf",
             "state": {
-              "type": "canvas",
-              "state": {
-                "file": "Program Logic.canvas",
-                "viewState": {
-                  "x": 94.49338235294118,
-                  "y": 86.09628419826875,
-                  "zoom": -0.6274695105353442
-                }
-              },
-              "icon": "lucide-layout-dashboard",
-              "title": "Program Logic"
+              "type": "empty",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "New tab"
             }
           }
         ]
@@ -191,8 +184,9 @@
       "bases:Create new base": false
     }
   },
-  "active": "0dae9a3128092b31",
+  "active": "fe7695c4d902052e",
   "lastOpenFiles": [
+    "file:/home/jeremy/Downloads/instagrapi_login_reference.md",
     "Untitled.md",
     "Program Logic.canvas",
     "Input.md",
