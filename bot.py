@@ -9,6 +9,11 @@ from instagrapi import Client
 from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError, TwoFactorRequired, ChallengeError, ChallengeUnknownStep, ChallengeSelfieCaptcha, RecaptchaChallengeForm, ClientError
 from instagrapi.mixins.challenge import ChallengeChoice
 
+# ==============================================
+# Database, Gemini and Encryption key initiation
+# ==============================================
+
+
 #Initialize the database for the first time, if you later modify the tables, it will check and add them
 def init_db() -> bool:
     with sqlite3.connect("app.db") as connection: 
@@ -81,13 +86,17 @@ def load_ai () -> bool:
     except APIError as e:
         print(f"Google API Authentication Error: {e.message}")
         return False
+    
+# ===========================================================
+# Instagrapi Session logging and retrieving with encryption
+# ===========================================================
 
 #Saves the sessions.json file from the instagrapi client to the database of the user
 def session_logging (username) -> bool:
     cl = Client()
     session_bytes = json.dumps(cl.get_settings()).encode()
     nonce = os.urandom(12)
-    ciphertext = aesgcm.encrypt(nonce, session_bytes, username.encode)
+    ciphertext = aesgcm.encrypt(nonce, session_bytes, username.encode())
 
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
@@ -120,6 +129,10 @@ def session_recupering (username):
     connection.close()
     return session_dict
 
+# ========================================================
+# Instagrapi login and loading (when user already exists)
+# ========================================================
+
 #Log the user in, will need to be used in the instagrapi full client loading logic later
 def instagrapi_login (username, password) -> bool:
     cl = Client()
@@ -143,7 +156,7 @@ def instagrapi_login (username, password) -> bool:
 def instagrapi_backin (username, password) -> bool:
     cl = Client() 
     session_data = session_recupering(username)
-    cl.load_settings(session_data)
+    cl.set_settings(session_data)
 
     try:
         cl.get_timeline_feed()
@@ -174,6 +187,9 @@ def challenge_code_handler (username, choice):
         return input("Input your code received via Email: ").strip()
     return False
 
+# ==============================================
+# Main loop and initiation logic
+# ==============================================
 
 #App logic
 if __name__ == "__main__":
@@ -260,8 +276,8 @@ if __name__ == "__main__":
         #Create a new user
         elif key == "2":
             print("Creating a new user: ")
-            user_name = input("Input instagram username: ").strip
-            user_password = input("Input instagram password: ").strip
+            user_name = input("Input instagram username: ").strip()
+            user_password = input("Input instagram password: ").strip()
             if not instagrapi_login(user_name, user_password):
                 continue
             #Logs the new session data into the database for a complete table
@@ -271,6 +287,7 @@ if __name__ == "__main__":
             connection.close()
             session_logging(user_name)
             print("You are setup!")
+            print("----------\n")
             break
 
         #wrong input handling
@@ -291,6 +308,3 @@ if __name__ == "__main__":
 
         print(response.text)
         print("----------")
-
-# ToDo
-# - Separate the service of the AI and instagrapi because they need different dependencies (truly a pain)
