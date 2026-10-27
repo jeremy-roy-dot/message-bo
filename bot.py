@@ -1,4 +1,4 @@
-import time
+from datetime import datetime
 import os
 import json
 import sqlite3
@@ -13,7 +13,6 @@ from instagrapi.mixins.challenge import ChallengeChoice
 # Database, Gemini and Encryption key initiation
 # ==============================================
 
-
 #Initialize the database for the first time, if you later modify the tables, it will check and add them
 def init_db() -> bool:
     with sqlite3.connect("app.db") as connection: 
@@ -27,12 +26,30 @@ def init_db() -> bool:
             session_data BLOB
         );
 
+        CREATE TABLE IF NOT EXISTS threads (
+            thread_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username VARCHAR(30) NOT NULL UNIQUE,
+            current_feeling TEXT NOT NULL,
+            character TEXT NOT NULL,
+            last_msg TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS messages (
+            message_id INTEGER PRIMARY KEY,
+            thread_id INTEGER NOT NULL,
+            sender TEXT NOT NULL,
+            text_content TEXT,
+            timestamp TEXT NOT NULL,
+            FOREIGN KEY (thread_id) REFERENCES threads(thread_id)
+        );
+
         CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username on users(username);
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_username on conversations(username);
         """
 
         cursor.executescript(create_table_query)
         print("Succesfully initialized database!")
-    connection.close()
     return True
 
 #Creates or load the key in charge of encrypting the session data json files that go into the database
@@ -109,7 +126,6 @@ def session_logging (username) -> bool:
         cursor.execute(update_query, [nonce, ciphertext, username])
 
         print("Session succesfully saved to database")
-    connection.close()
     return True
 
 #Loads the session data from the database into the instagrapi client
@@ -126,7 +142,6 @@ def session_recupering (username):
         row = cursor.fetchone()
 
         session_dict = json.loads(str(aesgcm.decrypt(row[0], row[1], username.encode()).decode()))
-    connection.close()
     return session_dict
 
 # ========================================================
@@ -180,12 +195,56 @@ def instagrapi_backin (username, password) -> bool:
 
 #Handles the code request from instagram
 def challenge_code_handler (username, choice):
+
     print(f"Challenge triggered for {username}")
     if choice == ChallengeChoice.SMS:
         return input("Input your code received via SMS: ").strip()
     if choice == ChallengeChoice.EMAIL:
         return input("Input your code received via Email: ").strip()
     return False
+
+# ============================
+# AI loop
+# ============================
+
+def message_maker (convo_id: int):
+    prompt = ""
+
+    with sqlite3.connect("app.db") as connection:
+        cursor = connection.cursor()
+        cursor.execute("SELECT timestamp, sender, text_content FROM messages WHERE thread_id = (?) ORDER BY message_id ASC", (convo_id,))
+        messages = cursor.fetchall()
+
+        cursor.execute("SELECT character, current_feeling, last_msg FROM threads WHERE thread_id = (?)", (convo_id, ))
+        personality, feeling, last_msg = cursor.fetchone()
+
+        prompt += f"You are: {personality} and from the last thread that left at: {last_msg} you felt: {feeling}. If any part is None (no last_msg, no chat history, no feeling, etc) approximate and improvise based on what makes more sense for a private chat. "
+
+        prompt += "The messages will follow structure: [(timestamp)sender:text_content]. "
+
+        for message in messages:
+            timestamp, sender, text_content = message
+            prompt += f"[({timestamp}){sender}:{text_content}]"
+
+        prompt += "Only output a short text message and a slightly modified feeling, only split them with :. Message first, feelings second 'message:feeling'. (no introductory passage from you, no ending passage from you just a simple string without enters) Write like a human, consistent with the sender that is called me"
+    connection.close()
+
+    output = ai_client.models.generate_content(
+        model = "gemini-2.5-flash",
+        contents = prompt,
+    )
+
+    raw_text = output.text
+    if not raw_text:
+        print("There's been an issue during generation of message")
+        return False
+    if not ":" in raw_text:
+        print("The text generated wrong")
+        return False
+
+    reponse, new_feeling = raw_text.split(":")
+
+    return response, new_feeling
 
 # ==============================================
 # Main loop and initiation logic
@@ -253,7 +312,6 @@ if __name__ == "__main__":
                 for username in profiles:
                     print(f"User: {username[0]} [{user_count}]")
                     user_count += 1
-            connection.close()
             print("(ctrl + c to close)")
 
             #Requests the user to choose a user
@@ -284,7 +342,6 @@ if __name__ == "__main__":
             with sqlite3.connect("app.db") as connection:
                 cursor = connection.cursor()
                 cursor.execute("INSERT INTO users (username) VALUES (?);", (user_name,))
-            connection.close()
             session_logging(user_name)
             print("You are setup!")
             print("----------\n")
