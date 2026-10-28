@@ -8,6 +8,7 @@ from google.genai.errors import APIError
 from instagrapi import Client
 from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError, TwoFactorRequired, ChallengeError, ChallengeUnknownStep, ChallengeSelfieCaptcha, RecaptchaChallengeForm, ClientError
 from instagrapi.mixins.challenge import ChallengeChoice
+from pydantic import BaseModel, Field
 
 # ==============================================
 # Database, Gemini and Encryption key initiation
@@ -207,44 +208,121 @@ def challenge_code_handler (username, choice):
 # AI loop
 # ============================
 
-def message_maker (convo_id: int):
-    prompt = ""
+class CharacterResponse(BaseModel):
+    message: str = Field(description="Only the text of the next message, written by the persona in the same style as the earlier 'me' messages. No timestamp, no quotes, no labels.")
+    new_feeling: str = Field(description="The persona's mood right after sending this message, which is also the mood they will be in when the reply arrives. A short phrase of 2 to 6 words (example: 'tired but chill'). It should be a small change from the previous mood, shaped by the time that passed and any small event.")
 
+
+def message_maker(convo_id: int):
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
-        cursor.execute("SELECT timestamp, sender, text_content FROM messages WHERE thread_id = (?) ORDER BY message_id ASC", (convo_id,))
+
+        cursor.execute("SELECT character, current_feeling, last_msg FROM threads WHERE thread_id = ?", (convo_id,))
+        thread = cursor.fetchone()
+        # In case the cursor found nothing with the inputted thread_id
+        if not thread:
+            return False
+        personality, feeling, last_msg = thread
+
+        cursor.execute("SELECT timestamp, sender, text_content FROM messages WHERE thread_id = ? ORDER BY message_id ASC", (convo_id,))
         messages = cursor.fetchall()
-
-        cursor.execute("SELECT character, current_feeling, last_msg FROM threads WHERE thread_id = (?)", (convo_id, ))
-        personality, feeling, last_msg = cursor.fetchone()
-
-        prompt += f"You are: {personality} and from the last thread that left at: {last_msg} you felt: {feeling}. If any part is None (no last_msg, no chat history, no feeling, etc) approximate and improvise based on what makes more sense for a private chat. "
-
-        prompt += "The messages will follow structure: [(timestamp)sender:text_content]. "
-
-        for message in messages:
-            timestamp, sender, text_content = message
-            prompt += f"[({timestamp}){sender}:{text_content}]"
-
-        prompt += "Only output a short text message and a slightly modified feeling, only split them with :. Message first, feelings second 'message:feeling'. (no introductory passage from you, no ending passage from you just a simple string without enters) Write like a human, consistent with the sender that is called me"
     connection.close()
+    
+    now = datetime.now()
+    now_text = now.strftime("%A %Y-%m-%d %H:%M")
 
-    output = ai_client.models.generate_content(
-        model = "gemini-2.5-flash",
-        contents = prompt,
+    # Time since the last message, if none is figured out: keep unknown
+    gap_text = "unknown"
+    if messages:
+        try:
+            gap = now - datetime.fromisoformat(str(messages[-1][0]))
+            minutes = gap.total_seconds() / 60
+            if minutes < 60:
+                gap_text = f"{int(minutes)} minutes"
+            elif minutes < 48 * 60:
+                gap_text = f"{round(minutes / 60)} hours"
+            else:
+                gap_text = f"{gap.days} days"
+        except ValueError:
+            pass
+
+    system_instruction = (
+        "You are texting someone on a private messaging app. You are a real person, not an assistant.\n\n"
+        f"PERSONA: {personality or 'a friend of the other sender'}\n"
+        f"MOOD (as of your last message): {feeling or 'neutral happy'}\n"
+        f"LAST THING YOU REMEMBER: {last_msg or 'nothing, this is a brand new chat'}\n"
+        f"RIGHT NOW: {now_text}\n"
+        f"TIME SINCE THE LAST MESSAGE: {gap_text}\n\n"
+        "YOUR TASK: Read the chat history and write the next message your persona would send.\n\n"
+        "HOW THE HISTORY LOOKS: Your own earlier messages are the 'model' turns. The other person's messages are the 'user' turns. "
+        "Each one starts with a [timestamp] that is only there to help you judge timing. "
+        "Never write a timestamp in your message.\n\n"
+        "HOW TO USE THESE RULES: The persona is the boss. Every message you write must pass through it. "
+        "The rules below describe a normal, average person. Whenever the persona says something different "
+        "(busy, shy, loud, funny, tired...), follow the persona and drop the default. "
+        "If the persona says nothing about something, use the default. "
+        "Never invent new traits for the persona.\n\n"
+        "RULES:\n"
+        "1) NORMAL HUMAN: By default you are an average person on DMs. Casual, mostly short messages, "
+        "not always excited, doesn't always ask a question back, sometimes dry or distracted. "
+        "Never sound like an assistant (no 'Sure!', no offering help, no summaries). "
+        "The weaker the persona is, the more you act like this normal person.\n"
+        "2) VOICE: Look at your own earlier messages in the history. Write the same way: "
+        "same length, slang, punctuation, emojis, capital letters, language. Stay consistent. "
+        "Over time you may slowly pick up a little of how the other person writes, like real friends do, "
+        "but your own voice always comes first. Do not copy them.\n"
+        "3) TIME AND MOOD: Use RIGHT NOW and TIME SINCE THE LAST MESSAGE to judge what day and time it is, and how long you were away. "
+        "Your mood should not stay the same forever. By default, life is boring: most days nothing special happens, "
+        "you are just a little tired. Weekends are relaxed. "
+        "Then let the persona change this (a busy parent who works out has a tired weekend, for example).\n"
+        "4) LIFE EVENTS: After a longer gap, something small may have happened to you. Keep it ordinary and fitting for the persona. "
+        "A few hours = nothing. A few days = a small thing. A few weeks = something bigger. "
+        "Most of the time, nothing big happened.\n"
+        "5) EVENTS STAY HIDDEN: Never announce or explain what happened. It only shows through your mood and tone "
+        "(shorter, more tired, more upbeat...). Whether you talk about it depends on the persona: "
+        "open, talkative personas may bring it up, quiet personas only say it if asked. "
+        "If the persona doesn't say, don't say much, like a normal person.\n"
+        "6) NEW CHAT: If the only thing in the history is a note saying it is a brand new chat, "
+        "start the conversation the way the persona naturally would, short and casual. "
+        "Never mention missing history and never invent a past.\n\n"
+        "FINAL CHECK: Persona first, normal human second. Only the message text, no timestamp."
     )
 
-    raw_text = output.text
-    if not raw_text:
-        print("There's been an issue during generation of message")
-        return False
-    if not ":" in raw_text:
-        print("The text generated wrong")
-        return False
+    contents = []
+    for timestamp, sender, text_content in messages:
+        # Map your custom database senders to API roles ('user' or 'model')
+        role = "model" if sender == "me" else "user"
+        contents.append({
+            "role": role,
+            "parts": [{"text": f"[{timestamp}] {text_content}"}]
+        })
 
-    reponse, new_feeling = raw_text.split(":")
+    # The API needs at least one message, so a brand new chat gets one note
+    if not contents:
+        contents.append({
+            "role": "user",
+            "parts": [{"text": f"[{now_text}] (Brand new chat. No messages yet. Send the first message.)"}]
+        })
 
-    return response, new_feeling
+    try:
+        # Generate content with the JSON structure
+        output = ai_client.models.generate_content(
+            model="gemini-3-flash",
+            contents=contents,
+            config={
+                "system_instruction": system_instruction,
+                "response_mime_type": "application/json",
+                "response_schema": CharacterResponse,
+                "temperature": 0.7,  # Adds natural, human-like variance
+            }
+        )
+
+        result = output.parsed
+        return result.message, result.new_feeling
+    
+    except Exception as e:
+        print(f"Generation or parsing failed: {e}")
+        return False
 
 # ==============================================
 # Main loop and initiation logic
