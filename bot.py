@@ -524,7 +524,26 @@ if __name__ == "__main__":
         usernames.append(new_user)
         print(f"Will proceed with the initialization of a thread with {new_user}")
         thread = thread_grabber(new_user)
-    
+
+        with sqlite3.connect("app.db") as connection:
+            cursor = connection.cursor()
+
+            character = input("Input a description of your new characer, go into as much details as possible: ").lower()
+            feeling = input("Input the base feeling you want you character to be in when starting the conversation, make it short and simple: ").lower()
+
+            cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", ("0", new_user, feeling, character))
+
+            message, new_feeling = message_maker(thread)
+            message_response = cl.direct_send(
+                text=message,
+                user_ids=[thread.user_ids[0]]
+            )
+            new_thread_id = message_response.thread_id
+            cursor.execute("UPDATE threads SET thread_id=? WHERE thread_id=0", (new_thread_id, ))
+        connection.close()
+
+        thread = thread_grabber(new_user)
+
     else:
         selected_user = usernames[selection - 1]
         with sqlite3.connect("app.db") as connection:
@@ -535,18 +554,31 @@ if __name__ == "__main__":
         connection.close()
         thread = thread_loader(selected_user, thread_id)
 
+        #Verifies that the thread is up to date, if not, makes it up to date
+        latest_message = cl.direct_messages(thread.id, amount=1)
+        if thread.messages[0].id == latest_message.id:
+            pass
+        else:
+            thread = thread_grabber(selected_user)
+
     #This is the part that finalizes the initialization before loading the main bot loop
     print(f"Activating bot for {usernames[selection - 1]}")
     print("Loading thread for real time display...")
 
-    # need to remake the message logic
-    # This was formatting a list of old DM rows from the removed `messages` table into a prompt string for the bot.
-    # This normally printed the chat history
+    for msg in thread.messages:
+        sender = "bot" if msg.is_sent_by_viewer else "user"
+        raw_timestamp = msg.timestamp
 
+        if len(str(raw_timestamp)) >= 16:
+            timestamp_seconds = raw_timestamp / 1_000_000  # Microseconds
+        else:
+            timestamp_seconds = raw_timestamp / 1_000  
+        datetime_object = datetime.fromtimestamp(timestamp_seconds)
+        log_format = datetime_object.strftime("%Y-%m-%d %H:%M:%S")
+
+        print(f"[{log_format}]{sender}: {msg.text}")
+    print("Done printing the message history. You are now live")
     
-
-
-
     while True:
         #have something to retrieve messages in real time and put the answer/send part here
 
