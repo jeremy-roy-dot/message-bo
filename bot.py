@@ -271,16 +271,18 @@ def message_maker(thread):
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
 
-        cursor.execute("SELECT character, current_feeling FROM threads WHERE thread_id = ?", (thread.id,))
-        row = cursor.fetchone()
-        # In case the cursor found nothing with the inputted thread_id
-        if not row:
-            return False
-        personality, feeling = row
+        if not thread is None:
+            cursor.execute("SELECT character, current_feeling FROM threads WHERE thread_id = ?", (thread.id,))
+            row = cursor.fetchone()
+            # In case the cursor found nothing with the inputted thread_id
+            if not row:
+                print("The thread with the thread id does not exist in the database")
+                return False
+            personality, feeling = row
     connection.close()
     
     contents = []
-    if thread.id == "0":
+    if thread is None:
         contents = ["This is a brand new conversation, start it according to your character"]
         last_msg = ""
         time_since_last = "No previous message"
@@ -359,23 +361,24 @@ def message_maker(thread):
     
     except Exception as e:
         print(f"Generation or parsing failed: {e}")
-        return False
-
+        exit()
 #=============================
 # Instagrapi message manager
 #=============================
 
 #Grabs the thread object from instagram, this contains everything about the specific thread
-def thread_grabber (username):
-    client = ensure_logged_in("thread_grabber")
+def thread_grabber(username):
+    cl = ensure_logged_in("thread_grabber")
 
-    user_id = client.user_id_from_username(username)
-    thread = client.direct_thread_by_participants([int(user_id)])
-    if not thread.id or thread.id == "0":
+    user_id = cl.user_id_from_username(username)
+    result = cl.direct_thread_by_participants([int(user_id)])
+
+    thread_id = result.get("thread", {}).get("thread_id")
+    if not thread_id:
         print("The thread is new")
-        return thread
-    thread = client.direct_thread(thread_id=thread.id, amount=1000)
-    return thread
+        return None
+
+    return cl.direct_thread(thread_id=thread_id, amount=1000)
 
 # ==============================================
 # Main loop and initiation logic
@@ -414,7 +417,8 @@ if __name__ == "__main__":
         exit()
 
     #Instagrapi initiation
-    while True:
+    cl.login_by_sessionid("61453161962%3A9WvtC7xLxkNEHX%3A18%3AAYmwaSG2Adh9bXXxEWatbzQ154HBJFPRBIBcwpusRQ")
+    while False: #Changed for testing sake
         print("Instagrapi Initiation:")
         print("- Login to existing user [1]\n- Sign up with new user [2]\n- Close program [3] or [ctrl + c]")
         key = input().strip()
@@ -488,7 +492,7 @@ if __name__ == "__main__":
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
 
-        cursor.execute("SELECT username FROM thereads")
+        cursor.execute("SELECT username FROM threads")
         rows = cursor.fetchall()
 
         print("Select a user to message or create a new one")
@@ -524,14 +528,15 @@ if __name__ == "__main__":
         usernames.append(new_user)
         print(f"Will proceed with the initialization of a thread with {new_user}")
         thread = thread_grabber(new_user)
+        #There's an issue with thread.id as in it might not be the way to actually grab it or grab it correctly
 
         with sqlite3.connect("app.db") as connection:
             cursor = connection.cursor()
 
             character = input("Input a description of your new characer, go into as much details as possible: ").lower()
             feeling = input("Input the base feeling you want you character to be in when starting the conversation, make it short and simple: ").lower()
-
-            cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", ("0", new_user, feeling, character))
+            thread_id = thread.id if thread else None
+            cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", (thread_id, new_user, feeling, character))
 
             message, new_feeling = message_maker(thread)
             message_response = cl.direct_send(
@@ -539,7 +544,7 @@ if __name__ == "__main__":
                 user_ids=[thread.user_ids[0]]
             )
             new_thread_id = message_response.thread_id
-            cursor.execute("UPDATE threads SET thread_id=? WHERE thread_id=0", (new_thread_id, ))
+            cursor.execute("UPDATE threads SET thread_id=? WHERE thread_id IS NULL", (new_thread_id, ))
         connection.close()
 
         thread = thread_grabber(new_user)
