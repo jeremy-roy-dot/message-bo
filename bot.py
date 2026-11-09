@@ -195,7 +195,7 @@ def thread_loader (username, thread_id):
 # ========================================================
 
 #Log the user in, will need to be used in the instagrapi full client loading logic later
-def instagrapi_login (username, password) -> bool:
+def instagrapi_password_login (username, password) -> bool:
     global cl
     if cl is None:
         raise LoginRequired("Instagram client was not initialized before login.")
@@ -217,7 +217,7 @@ def instagrapi_login (username, password) -> bool:
             return False
 
 #Loads back the session if it exists
-def instagrapi_backin (username, password) -> bool:
+def instagrapi_backin (username) -> bool:
     global cl
     if cl is None:
         raise LoginRequired("Instagram client was not initialized before restoring a session.")
@@ -238,14 +238,24 @@ def instagrapi_backin (username, password) -> bool:
         cl.set_uuids(old_settings["uuids"])
         cl.set_device(old_settings["device_settings"])
         cl.set_user_agent(old_settings["user_agent"])
-        if not instagrapi_login(username, password):
-            print("Stopping program")
-            exit()
-        if not (session_logging(username) == True):
-            print("There's been an issue, stopping program")
-            exit()
-        print("You are logged in")
-        return True
+        if input("You need to login again as your session has expired. [1] to use password [2] to use a new session id") == "1":
+            password = input("You must input your username")
+            if not instagrapi_password_login(username, password):
+                print("Stopping program")
+                exit()
+            if not (session_logging(username) == True):
+                print("There's been an issue, stopping program")
+                exit()
+            print("You are logged in")
+            return True
+        else:
+            print("Using a session id")
+            print(f"Please acquire a session id from a web browser for {username} and input it")
+            session_id = input("Input session id: ").strip()
+            cl.login_by_sessionid(session_id)
+            session_logging(username)
+            print("You are logged in") #This might be false
+            return True
 
 #Handles the code request from instagram
 def challenge_code_handler (username, choice):
@@ -463,18 +473,23 @@ if __name__ == "__main__":
             print(f"Success choosing user[{user_number}]: {profiles[user_number - 1][0]}")
 
             #Requests password and tries to login, if instagrapi_backin fails, it auto closes the program
-            user_password = input("Input password: ").strip()
-            if instagrapi_backin(profiles[user_number - 1][0], user_password):
+            if instagrapi_backin(profiles[user_number - 1][0]):
                 print(f"Successfully logged in as: {profiles[user_number - 1][0]}")
                 break
 
         #Create a new user
         elif key == "2":
             print("Creating a new user: ")
-            user_name = input("Input instagram username: ").strip().lower()
-            user_password = input("Input instagram password: ").strip()
-            if not instagrapi_login(user_name, user_password):
-                continue
+            user_name = input("Input instagram username: ").strip().lower()            
+            if input("Input [1] to login with password [2] to use a session id: ") == "1":
+                print("Using password")
+
+                user_password = input("Input instagram password: ").strip()
+                if not instagrapi_password_login(user_name, user_password):
+                    continue
+            else:
+                print("Using session id")
+                cl.login_by_sessionid(input("Input session id: ").strip())
             #Logs the new session data into the database for a complete table
             with sqlite3.connect("app.db") as connection:
                 cursor = connection.cursor()
