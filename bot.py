@@ -152,7 +152,7 @@ def session_recupering (username):
 #Saves the thread object
 def thread_saving (username, thread):
 
-    thread_bytes = thread.json().encode()
+    thread_bytes = thread.model_dump_json().encode()
 
     nonce = os.urandom(12)
     ciphertext = aesgcm.encrypt(nonce, thread_bytes, username.encode())
@@ -160,10 +160,10 @@ def thread_saving (username, thread):
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
         update_query = """
-        INSERT OR REPLACE INTO threads (thread_id, username, thread_nonce, thread_data)
-        VALUES (?, ?, ?, ?);
+        UPDATE threads SET thread_id=?, thread_nonce=?, thread_data=?
+        WHERE username=?;
         """
-        cursor.execute(update_query, [thread.id, username, nonce, ciphertext])
+        cursor.execute(update_query, [str(thread.id), nonce, ciphertext, username])
     connection.close()
 
     print(f"Thread with {thread.users[0].username} has been properly saved and encrypted to the database")
@@ -185,7 +185,7 @@ def thread_loader (username, thread_id):
         decrypted_thread_bytes = aesgcm.decrypt(nonce, ciphertext, username.encode())
         json_string = decrypted_thread_bytes.decode()
 
-        thread_object = DirectThread.parse_raw(json_string)
+        thread_object = DirectThread.model_validate_json(json_string)
     connection.close()
 
     return thread_object
@@ -270,26 +270,30 @@ class CharacterResponse(BaseModel):
 def message_maker(thread):
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
-
-        cursor.execute("SELECT character, current_feeling FROM threads WHERE thread_id = ?", (thread.id,))
+        cursor.execute("SELECT character, current_feeling FROM threads where username=?", (new_user,))
         row = cursor.fetchone()
-        # In case the cursor found nothing with the inputted thread_id
-        if not row:
-            return False
         personality, feeling = row
+
+        if thread is None:
+            last_msg = ("", 1, "Nothing, this is a brand new chat")
+            time_since_last = "No previous message"
+            contents = ["This is a brand new conversation, start it according to your character"]
+
     connection.close()
     
     contents = []
-    if thread.id == "0":
-        contents = ["This is a brand new conversation, start it according to your character"]
-        last_msg = ""
+    if thread is None:
         time_since_last = "No previous message"
+
     else:
         for message in thread.messages:
             sender = "model" if message.is_sent_by_viewer else "user"
             contents.append((message.timestamp, sender, message.text))
         last_msg = contents[0]
-        total_seconds = (datetime.now(timezone.utc) - last_msg[0]).total_seconds()
+        msg_time = last_msg[0]
+        if msg_time.tzinfo is None:
+            msg_time = msg_time.astimezone()  # treats it as your local time
+        total_seconds = (datetime.now(timezone.utc) - msg_time).total_seconds()
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
         time_since_last = f"{hours}h{minutes}min"
@@ -301,10 +305,10 @@ def message_maker(thread):
 
     system_instruction = (
         "You are texting someone on a private messaging app. You are a real person, not an assistant.\n\n"
-        f"PERSONA: {personality or 'a friend of the other sender'}\n"
-        f"MOOD (as of your last message): {feeling or 'neutral happy'}\n"
-        f"LAST THING MESSAGE: {last_msg or 'nothing, this is a brand new chat'}\n"
-        f"RIGHT NOW: {datetime.now}\n"
+        f"PERSONA: {personality}\n"
+        f"MOOD (as of your last message): {feeling}\n"
+        f"LAST THING MESSAGE: {last_msg[2]}\n"
+        f"RIGHT NOW: {datetime.now()}\n"
         f"TIME SINCE THE LAST MESSAGE: {time_since_last}\n\n"
         "YOUR TASK: Read the chat history and write the next message your persona would send.\n\n"
         "HOW THE HISTORY LOOKS: Your own earlier messages are the 'model' turns. The other person's messages are the 'user' turns. "
@@ -344,7 +348,7 @@ def message_maker(thread):
     try:
         # Generate content with the JSON structure
         output = ai_client.models.generate_content(
-            model="gemini-3-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
             config={
                 "system_instruction": system_instruction,
@@ -359,23 +363,24 @@ def message_maker(thread):
     
     except Exception as e:
         print(f"Generation or parsing failed: {e}")
-        return False
-
+        exit()
 #=============================
 # Instagrapi message manager
 #=============================
 
 #Grabs the thread object from instagram, this contains everything about the specific thread
-def thread_grabber (username):
-    client = ensure_logged_in("thread_grabber")
+def thread_grabber(username):
+    cl = ensure_logged_in("thread_grabber")
 
-    user_id = client.user_id_from_username(username)
-    thread = client.direct_thread_by_participants([int(user_id)])
-    if not thread.id or thread.id == "0":
+    user_id = cl.user_id_from_username(username)
+    result = cl.direct_thread_by_participants([int(user_id)])
+
+    thread_id = result.get("thread", {}).get("thread_id")
+    if not thread_id:
         print("The thread is new")
-        return thread
-    thread = client.direct_thread(thread_id=thread.id, amount=1000)
-    return thread
+        return None
+
+    return cl.direct_thread(thread_id=thread_id, amount=1000)
 
 # ==============================================
 # Main loop and initiation logic
@@ -414,7 +419,7 @@ if __name__ == "__main__":
         exit()
 
     #Instagrapi initiation
-    while True:
+    while True: #Changed for testing sake
         print("Instagrapi Initiation:")
         print("- Login to existing user [1]\n- Sign up with new user [2]\n- Close program [3] or [ctrl + c]")
         key = input().strip()
@@ -488,7 +493,7 @@ if __name__ == "__main__":
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
 
-        cursor.execute("SELECT username FROM thereads")
+        cursor.execute("SELECT username FROM threads")
         rows = cursor.fetchall()
 
         print("Select a user to message or create a new one")
@@ -524,25 +529,29 @@ if __name__ == "__main__":
         usernames.append(new_user)
         print(f"Will proceed with the initialization of a thread with {new_user}")
         thread = thread_grabber(new_user)
+        #There's an issue with thread.id as in it might not be the way to actually grab it or grab it correctly
 
         with sqlite3.connect("app.db") as connection:
             cursor = connection.cursor()
 
             character = input("Input a description of your new characer, go into as much details as possible: ").lower()
             feeling = input("Input the base feeling you want you character to be in when starting the conversation, make it short and simple: ").lower()
+            thread_id = thread.id if thread else None
+            cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", (thread_id, new_user, feeling, character))
 
-            cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", ("0", new_user, feeling, character))
-
+            connection.commit()
+            
             message, new_feeling = message_maker(thread)
             message_response = cl.direct_send(
                 text=message,
-                user_ids=[thread.user_ids[0]]
+                user_ids=[cl.user_id_from_username(new_user)]
             )
-            new_thread_id = message_response.thread_id
-            cursor.execute("UPDATE threads SET thread_id=? WHERE thread_id=0", (new_thread_id, ))
+            new_thread_id = str(message_response.thread_id)
+            cursor.execute("UPDATE threads SET thread_id=? WHERE username=?", (new_thread_id, new_user))
         connection.close()
 
         thread = thread_grabber(new_user)
+        thread_saving(new_user, thread)
 
     else:
         selected_user = usernames[selection - 1]
@@ -555,8 +564,8 @@ if __name__ == "__main__":
         thread = thread_loader(selected_user, thread_id)
 
         #Verifies that the thread is up to date, if not, makes it up to date
-        latest_message = cl.direct_messages(thread.id, amount=1)
-        if thread.messages[0].id == latest_message.id:
+        latest = cl.direct_messages(thread.id, amount=1)
+        if latest and thread.messages and thread.messages[0].id == latest[0].id:
             pass
         else:
             thread = thread_grabber(selected_user)
@@ -565,17 +574,9 @@ if __name__ == "__main__":
     print(f"Activating bot for {usernames[selection - 1]}")
     print("Loading thread for real time display...")
 
-    for msg in thread.messages:
+    for msg in reversed(thread.messages):
         sender = "bot" if msg.is_sent_by_viewer else "user"
-        raw_timestamp = msg.timestamp
-
-        if len(str(raw_timestamp)) >= 16:
-            timestamp_seconds = raw_timestamp / 1_000_000  # Microseconds
-        else:
-            timestamp_seconds = raw_timestamp / 1_000  
-        datetime_object = datetime.fromtimestamp(timestamp_seconds)
-        log_format = datetime_object.strftime("%Y-%m-%d %H:%M:%S")
-
+        log_format = msg.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{log_format}]{sender}: {msg.text}")
     print("Done printing the message history. You are now live")
     
@@ -590,3 +591,5 @@ if __name__ == "__main__":
 
         #Loop (3 things: catch messages, be able to manually message and update the database)
         pass
+
+#Need to make the
