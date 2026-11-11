@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import time
+import random
 import os
 import json
 import sqlite3
@@ -277,10 +279,10 @@ class CharacterResponse(BaseModel):
     new_feeling: str = Field(description="The persona's mood right after sending this message, which is also the mood they will be in when the reply arrives. A short phrase of 2 to 6 words (example: 'tired but chill'). It should be a small change from the previous mood, shaped by the time that passed and any small event.")
 
 #Takes the convo_id and outputs a brand new message for the conversation based on the info in the database (takes thread_id, outputs message and new feeling post message)
-def message_maker(thread):
+def message_maker(thread, message_to_answer="This is the initial boot so simply continue where the conversation left off. Make it make sense."):
     with sqlite3.connect("app.db") as connection:
         cursor = connection.cursor()
-        cursor.execute("SELECT character, current_feeling FROM threads where username=?", (new_user,))
+        cursor.execute("SELECT character, current_feeling FROM threads where username=?", (thread.users[0].username,))
         row = cursor.fetchone()
         personality, feeling = row
 
@@ -318,6 +320,7 @@ def message_maker(thread):
         f"PERSONA: {personality}\n"
         f"MOOD (as of your last message): {feeling}\n"
         f"LAST THING MESSAGE: {last_msg[2]}\n"
+        f"MESSAGE TO ANSWER: {message_to_answer}"
         f"RIGHT NOW: {datetime.now()}\n"
         f"TIME SINCE THE LAST MESSAGE: {time_since_last}\n\n"
         "YOUR TASK: Read the chat history and write the next message your persona would send.\n\n"
@@ -555,14 +558,17 @@ if __name__ == "__main__":
             cursor.execute("INSERT INTO threads (thread_id, username, current_feeling, character) VALUES (?, ?, ?, ?)", (thread_id, new_user, feeling, character))
 
             connection.commit()
-            
+
+            #Random timer to prevent suspicions
+            time.sleep(random.randint(10, 20))
+
             message, new_feeling = message_maker(thread)
             message_response = cl.direct_send(
                 text=message,
                 user_ids=[cl.user_id_from_username(new_user)]
             )
             new_thread_id = str(message_response.thread_id)
-            cursor.execute("UPDATE threads SET thread_id=? WHERE username=?", (new_thread_id, new_user))
+            cursor.execute("UPDATE threads SET thread_id=?, current_feeling=? WHERE username=?", (new_thread_id, new_feeling, new_user))
         connection.close()
 
         thread = thread_grabber(new_user)
@@ -579,8 +585,8 @@ if __name__ == "__main__":
         thread = thread_loader(selected_user, thread_id)
 
         #Verifies that the thread is up to date, if not, makes it up to date
-        latest = cl.direct_messages(thread.id, amount=1)
-        if latest and thread.messages and thread.messages[0].id == latest[0].id:
+        latest = cl.direct_messages(thread.id, amount=1)[0]
+        if latest and thread.messages and thread.messages[0].id == latest.id:
             pass
         else:
             thread = thread_grabber(selected_user)
@@ -594,17 +600,33 @@ if __name__ == "__main__":
         log_format = msg.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{log_format}]{sender}: {msg.text}")
     print("Done printing the message history. You are now live")
-    
+
+    #Variables for the live loop
+    latest = cl.direct_messages(thread.id, amount=1)[0]
+    to_send = []
+    message = ""
     while True:
-        #have something to retrieve messages in real time and put the answer/send part here
-
-        #Have the timer that does something like this: when receiving new message decides to make the current availibility high, medium or low and based on that we have 3 timers for different time to answer (30s to 1min without time to write, 5-15min, 1h-3h) also use it to implement rest moments where the bot will never answer and add the logic so it can reply a bit faster for a while after a long break since long break = activity and after the activity is done, no reason to go back to long wait time
-
-        #Have a stop to make it so the user can interrupt
-
-        #After each new message update the database
-
-        #Loop (3 things: catch messages, be able to manually message and update the database)
-        pass
-
-#Need to make the
+        #adds a timer between all loop
+        time.sleep(random.randint(10, 60))
+        
+        if latest.id != cl.direct_messages(thread.id, amount=1)[0].id:
+            print("The thread has been updated")
+            latest = cl.direct_messages(thread.id, amount=1)[0]
+            thread = thread_grabber(thread.users[0].username)
+            thread_saving(thread.users[0].username, thread)
+            sender = "bot" if latest.is_sent_by_viewer else "user"
+            log_format = latest.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{log_format}]{sender}: {latest.text}")
+            if latest.is_sent_by_viewer:
+                print("You sent the message")
+                continue
+            else:
+                print("The message was sent by the other person")
+                print("Answering...")
+                message, new_feeling = message_maker(thread, latest.text)
+                to_send.append(message)
+                time.sleep(random.randint(20, 120))
+                cl.direct_send(
+                    text=message,
+                    user_ids=[cl.user_id_from_username(thread.users[0].username)]
+                )
