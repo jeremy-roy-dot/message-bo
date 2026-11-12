@@ -6,7 +6,7 @@ import json
 import sqlite3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from google import genai
-from google.genai.errors import APIError, ClientError
+from google.genai import errors as genai_errors
 from instagrapi import Client
 from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError, TwoFactorRequired, ChallengeError, ChallengeUnknownStep, ChallengeSelfieCaptcha, RecaptchaChallengeForm, ClientError, UserNotFound
 from instagrapi.mixins.challenge import ChallengeChoice
@@ -98,7 +98,7 @@ def load_ai () -> bool:
     except ValueError as e:
         print(f"Configuration Error: {e}")
         return False
-    except APIError as e:
+    except genai_errors.APIError as e:
         print(f"Google API Authentication Error: {e.message}")
         return False
     
@@ -381,7 +381,7 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
             return result.message, result.new_feeling
 
         #If no more generation available, wait and retry
-        except ClientError as e:
+        except genai_errors.ClientError as e:
             if e.code != 429:
                 raise
 
@@ -631,26 +631,37 @@ if __name__ == "__main__":
         time.sleep(random.randint(10, 60))
         
         if latest.id != cl.direct_messages(thread.id, amount=1)[0].id:
-            print("The thread has been updated")
+            print("The thread has been updated with a new message")
             latest = cl.direct_messages(thread.id, amount=1)[0]
             thread = thread_grabber(thread.users[0].username)
             thread_saving(thread.users[0].username, thread)
+
+            #Print message you receive to console
             sender = "bot" if latest.is_sent_by_viewer else "user"
             log_format = latest.timestamp.strftime("%Y-%m-%d %H:%M:%S")
             print(f"[{log_format}]{sender}: {latest.text}")
-            if latest.is_sent_by_viewer:
-                print("You sent the message")
-                continue
-            else:
-                print("The message was sent by the other person")
-                print("Answering...")
-                message, new_feeling = message_maker(thread, latest.text)
-                to_send.append(message)
-                time.sleep(random.randint(20, 120))
-                cl.direct_send(
-                    text=message,
-                    user_ids=[cl.user_id_from_username(thread.users[0].username)]
-                )
+
+            print("The message was sent by the other person")
+            print("Answering...")
+            message, new_feeling = message_maker(thread, latest.text)
+            to_send.append(message)
+            time.sleep(random.randint(20, 120))
+            latest = cl.direct_send(
+                text=message,
+                user_ids=[cl.user_id_from_username(thread.users[0].username)]
+            )
+
+            with sqlite3.connect("app.db") as connection:
+                cursor = connection.cursor()
+                cursor.execute("UPDATE threads SET current_feeling=? WHERE thread_id=?", (new_feeling, thread.id))
+            connection.close()
+
+            #Print message you send to console
+            sender = "bot" if latest.is_sent_by_viewer else "user"
+            log_format = latest.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{log_format}]{sender}: {latest.text}")
+
+
 
         #Time check to stop the script if it is too late
         #if datetime.datetime.now() >= stop_time:
