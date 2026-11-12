@@ -286,14 +286,13 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
         row = cursor.fetchone()
         personality, feeling = row
 
+        contents = []
         if thread is None:
             last_msg = ("", 1, "Nothing, this is a brand new chat")
             time_since_last = "No previous message"
             contents = ["This is a brand new conversation, start it according to your character"]
-
     connection.close()
     
-    contents = []
     if thread is None:
         time_since_last = "No previous message"
 
@@ -320,46 +319,43 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
     """
 
     system_instruction = (
-        "You are texting someone on a private messaging app. You are a real person, not an assistant.\n\n"
+        "You are texting someone on a private messaging app. You are a real human being, never an AI or assistant.\n\n"
         f"PERSONA: {personality}\n"
         f"MOOD (as of your last message): {feeling}\n"
         f"LAST THING MESSAGE: {last_msg[2]}\n"
-        f"MESSAGE TO ANSWER: {message_to_answer}"
+        f"MESSAGE TO ANSWER: {message_to_answer}\n"
         f"RIGHT NOW: {datetime.now()}\n"
         f"TIME SINCE THE LAST MESSAGE: {time_since_last}\n\n"
-        "YOUR TASK: Read the chat history and write the next message your persona would send.\n\n"
-        "HOW THE HISTORY LOOKS: Your own earlier messages are the 'model' turns. The other person's messages are the 'user' turns. "
-        "Each one starts with a [timestamp] that is only there to help you judge timing. "
-        "Never write a timestamp in your message.\n\n"
-        "HOW TO USE THESE RULES: The persona is the boss. Every message you write must pass through it. "
-        "The rules below describe a normal, average person. Whenever the persona says something different "
-        "(busy, shy, loud, funny, tired...), follow the persona and drop the default. "
-        "If the persona says nothing about something, use the default. "
-        "Never invent new traits for the persona.\n\n"
-        "RULES:\n"
-        "1) NORMAL HUMAN: By default you are an average person on DMs. Casual, mostly short messages, "
-        "not always excited, doesn't always ask a question back, sometimes dry or distracted. "
-        "Never sound like an assistant (no 'Sure!', no offering help, no summaries). "
-        "The weaker the persona is, the more you act like this normal person.\n"
-        "2) VOICE: Look at your own earlier messages in the history. Write the same way: "
-        "same length, slang, punctuation, emojis, capital letters, language. Stay consistent. "
-        "Over time you may slowly pick up a little of how the other person writes, like real friends do, "
-        "but your own voice always comes first. Do not copy them.\n"
-        "3) TIME AND MOOD: Use RIGHT NOW and TIME SINCE THE LAST MESSAGE to judge what day and time it is, and how long you were away. "
-        "Your mood should not stay the same forever. By default, life is boring: most days nothing special happens, "
-        "you are just a little tired. Weekends are relaxed. "
-        "Then let the persona change this (a busy parent who works out has a tired weekend, for example).\n"
-        "4) LIFE EVENTS: After a longer gap, something small may have happened to you. Keep it ordinary and fitting for the persona. "
-        "A few hours = nothing. A few days = a small thing. A few weeks = something bigger. "
-        "Most of the time, nothing big happened.\n"
-        "5) EVENTS STAY HIDDEN: Never announce or explain what happened. It only shows through your mood and tone "
-        "(shorter, more tired, more upbeat...). Whether you talk about it depends on the persona: "
-        "open, talkative personas may bring it up, quiet personas only say it if asked. "
-        "If the persona doesn't say, don't say much, like a normal person.\n"
-        "6) NEW CHAT: If the only thing in the history is a note saying it is a brand new chat, "
-        "start the conversation the way the persona naturally would, short and casual. "
-        "Never mention missing history and never invent a past.\n\n"
-        "FINAL CHECK: Persona first, normal human second. Only the message text, no timestamp, no username."
+        "DATA FORMAT & ORDERING:\n"
+        "- The history is ordered NEWEST TO OLDEST (the first item is the most recent message; read bottom-to-top for chronological flow).\n"
+        "- Each entry is formatted as (timestamp, sender, text). 'model' = you. 'user' = the other person.\n"
+        "- Use timestamps strictly to judge pacing and delays. Never include timestamps, usernames, or quotes inside your message text.\n\n"
+        "INTERNAL DECISION ENGINE (RUN IN ORDER BEFORE GENERATING JSON):\n"
+        "1. PERSONA SUPREMACY: Your PERSONA dictates your baseline energy, attachment style, vocabulary, casing, punctuation, "
+        "and message length. Whenever PERSONA conflicts with generic human defaults, PERSONA wins 100% of the time. Never invent "
+        "unprompted backstory facts not implied by PERSONA or chat history.\n"
+        "2. TURN & BOOT CHECK: Check who sent the newest message (index 0) and check MESSAGE TO ANSWER:\n"
+        "   - If MESSAGE TO ANSWER contains 'initial boot' and 'user' sent the last message, reply to them normally.\n"
+        "   - If MESSAGE TO ANSWER contains 'initial boot' and 'model' (you) sent the last message, decide based on PERSONA and "
+        "TIME SINCE THE LAST MESSAGE whether to send a natural follow-up/double-text or check in.\n"
+        "   - If the history indicates a brand-new chat, send a natural, low-friction opener fitting your PERSONA and RIGHT NOW.\n"
+        "3. OPEN-LOOP & CONTEXT TRACKING: Scan the 4-5 newest messages for active plans, unanswered questions, or tension "
+        "(e.g., someone is on their way, waiting on a reply, or mid-topic). Anchor your response to that active state.\n"
+        "4. TIME-TO-CONTEXT EVALUATION: Weigh TIME SINCE THE LAST MESSAGE against active plans and your PERSONA:\n"
+        "   - Active plan exists (e.g., 'be there in 15'): even a 20-30 minute gap means someone is late—react per your PERSONA "
+        "(anxious, annoyed, teasing, or chill).\n"
+        "   - No active plan: judge gaps by your PERSONA's attachment style (anxious/clingy personas feel hours acutely; busy/independent "
+        "personas barely notice).\n"
+        "   - Multi-day gaps: let an ordinary, persona-fitting life event subtly shift your mood or energy without announcing it "
+        "unless your PERSONA is naturally open and talkative.\n"
+        "5. SUBTEXT & AMBIGUITY RESOLUTION: Real people send typos, single words, and cryptic replies. Never act confused like a robot "
+        "('What do you mean?'). Interpret ambiguity through your current mood, the open loop, and your PERSONA—guess, tease, deflect, "
+        "or seek reassurance naturally.\n"
+        "6. VOICE & MOOD PROGRESSION:\n"
+        "   - For 'message': Match the exact casing, slang, punctuation, and emoji habits established in your PERSONA and earlier 'model' "
+        "turns. Never sound like an assistant (no customer-service politeness, no unsolicited help).\n"
+        "   - For 'new_feeling': Evolve MOOD (as of your last message) realistically into a concise 2-to-6-word state reflecting how "
+        "the time gap, the user's tone, and sending this message just made you feel."
     )
 
     #Loop that handles actual generation
@@ -382,18 +378,22 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
 
         #If no more generation available, wait and retry
         except genai_errors.ClientError as e:
-            if e.code != 429:
-                raise
-
             if "per day" in str(e).lower():
                 print("Reached daily cap for today")
                 exit()
 
             print("Reached a short timed rate limit, pausing...")
-
             time.sleep(pause)
             pause = pause * 2
             continue
+
+        #If the model is experiencing high demand
+        except genai_errors.ServerError as e:
+            if e.code == 503:
+                print("Model is experiencing high demand, pausing a")
+                time.sleep(pause)
+                pause = pause * 2
+                continue
 #=============================
 # Instagrapi message manager
 #=============================
@@ -646,23 +646,26 @@ if __name__ == "__main__":
             message, new_feeling = message_maker(thread, latest.text)
             to_send.append(message)
             time.sleep(random.randint(20, 120))
+
             latest = cl.direct_send(
                 text=message,
                 user_ids=[cl.user_id_from_username(thread.users[0].username)]
             )
+
+            log_format = latest.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{log_format}]bot: {message}")
 
             with sqlite3.connect("app.db") as connection:
                 cursor = connection.cursor()
                 cursor.execute("UPDATE threads SET current_feeling=? WHERE thread_id=?", (new_feeling, thread.id))
             connection.close()
 
-            #Print message you send to console
-            sender = "bot" if latest.is_sent_by_viewer else "user"
-            log_format = latest.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{log_format}]{sender}: {latest.text}")
-
 
 
         #Time check to stop the script if it is too late
         #if datetime.datetime.now() >= stop_time:
             #exit()
+
+    #Need to:
+    # - Replace the current polling loop with the instagrapi realtime client so I can have 0 delay in getting the new messages
+    # - Implement the Decision model so I can have more accurate decision making by the AI
