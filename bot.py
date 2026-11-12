@@ -6,7 +6,7 @@ import json
 import sqlite3
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from google import genai
-from google.genai.errors import APIError
+from google.genai.errors import APIError, ClientError
 from instagrapi import Client
 from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, ChallengeRequired, ClientBadRequestError, TwoFactorRequired, ChallengeError, ChallengeUnknownStep, ChallengeSelfieCaptcha, RecaptchaChallengeForm, ClientError, UserNotFound
 from instagrapi.mixins.challenge import ChallengeChoice
@@ -298,9 +298,13 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
         time_since_last = "No previous message"
 
     else:
+
+        #Makes the content variable
         for message in thread.messages:
             sender = "model" if message.is_sent_by_viewer else "user"
             contents.append((message.timestamp, sender, message.text))
+
+        #Determines time since last
         last_msg = contents[0]
         msg_time = last_msg[0]
         if msg_time.tzinfo is None:
@@ -358,25 +362,38 @@ def message_maker(thread, message_to_answer="This is the initial boot so simply 
         "FINAL CHECK: Persona first, normal human second. Only the message text, no timestamp, no username."
     )
 
-    try:
-        # Generate content with the JSON structure
-        output = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config={
-                "system_instruction": system_instruction,
-                "response_mime_type": "application/json",
-                "response_schema": CharacterResponse,
-                "temperature": 0.7,  # Adds natural, human-like variance
-            }
-        )
+    #Loop that handles actual generation
+    pause = 2
+    while True:
+        try:
+            # Generate content with the JSON structure
+            output = ai_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    "system_instruction": system_instruction,
+                    "response_mime_type": "application/json",
+                    "response_schema": CharacterResponse,
+                    "temperature": 0.7,  # Adds natural, human-like variance
+                }
+         )
+            result = output.parsed
+            return result.message, result.new_feeling
 
-        result = output.parsed
-        return result.message, result.new_feeling
-    
-    except Exception as e:
-        print(f"Generation or parsing failed: {e}")
-        exit()
+        #If no more generation available, wait and retry
+        except ClientError as e:
+            if e.code != 429:
+                raise
+
+            if "per day" in str(e).lower():
+                print("Reached daily cap for today")
+                exit()
+
+            print("Reached a short timed rate limit, pausing...")
+
+            time.sleep(pause)
+            pause = pause * 2
+            continue
 #=============================
 # Instagrapi message manager
 #=============================
@@ -605,6 +622,10 @@ if __name__ == "__main__":
     latest = cl.direct_messages(thread.id, amount=1)[0]
     to_send = []
     message = ""
+    #stop_time = datetime.datetime.now().replace(
+    #    hour=22, minute=random.randint(0, 59), second=random.randint(0, 59)
+    #)
+
     while True:
         #adds a timer between all loop
         time.sleep(random.randint(10, 60))
@@ -630,3 +651,7 @@ if __name__ == "__main__":
                     text=message,
                     user_ids=[cl.user_id_from_username(thread.users[0].username)]
                 )
+
+        #Time check to stop the script if it is too late
+        #if datetime.datetime.now() >= stop_time:
+            #exit()
