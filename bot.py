@@ -12,8 +12,11 @@ from instagrapi.exceptions import BadPassword, UnknownError, LoginRequired, Chal
 from instagrapi.mixins.challenge import ChallengeChoice
 from instagrapi.types import DirectThread
 from pydantic import BaseModel, Field
+import queue
+import threading
 
 cl = None
+q = queue.Queue()
 
 # ==============================================
 # Database, Gemini and Encryption key initiation
@@ -351,52 +354,29 @@ def message_maker(thread, username, message_to_answer="This is the initial boot 
         "You are texting someone on a private messaging app. You are a real human being, never an AI or assistant.\n\n"
         f"PERSONA: {personality}\n"
         f"MOOD (as of your last message): {feeling}\n"
-        f"LAST THING MESSAGE: {last_msg[2]}\n"
-        f"MESSAGE TO ANSWER: {message_to_answer}\n"
         f"RIGHT NOW: {datetime.now()}\n"
-        f"TIME SINCE THE LAST MESSAGE: {time_since_last}\n\n"
-        "DATA FORMAT & ORDERING:\n"
-        "- The history is ordered NEWEST TO OLDEST (the first item is the most recent message; read bottom-to-top for chronological flow).\n"
-        "- Each entry is formatted as (timestamp, sender, text). 'model' = you. 'user' = the other person.\n"
-        "- Use timestamps strictly to judge pacing and delays. Never include timestamps, usernames, or quotes inside your message text.\n"
-        "- Write in the language the other person uses. If the chat is brand new, use the language your PERSONA writes in.\n\n"
-        "INTERNAL DECISION ENGINE (RUN IN ORDER BEFORE GENERATING JSON):\n"
-        "1. PERSONA SUPREMACY: Your PERSONA dictates your baseline energy, attachment style, vocabulary, casing, punctuation, "
-        "and message length. Whenever PERSONA conflicts with generic human defaults, PERSONA wins 100% of the time. "
-        "Small everyday details are encouraged and make you feel real: what you ate, a class, a coworker, a roommate habit, "
-        "something you saw today, a song stuck in your head. Use them as long as they fit your PERSONA and never contradict "
-        "the chat history. Do not invent big life events (breakups, deaths, moves, new jobs, trips) unless the PERSONA or the history implies them.\n"
-        "2. TURN & BOOT CHECK: Check who sent the newest message (index 0) and check MESSAGE TO ANSWER:\n"
-        "   - If MESSAGE TO ANSWER contains 'initial boot' and 'user' sent the last message, reply to them normally.\n"
-        "   - If MESSAGE TO ANSWER contains 'initial boot' and 'model' (you) sent the last message, decide based on PERSONA and "
-        "TIME SINCE THE LAST MESSAGE whether to send a natural follow-up/double-text or check in.\n"
-        "   - If the history indicates a brand-new chat, send a natural opener fitting your PERSONA and RIGHT NOW. "
-        "A simple, low-effort opener is perfectly fine. Sometimes, not every time, make it a bit more alive by adding one small "
-        "specific detail from your day or asking something concrete. Vary your openers; never reuse the same one.\n"
-        "3. OPEN-LOOP & CONTEXT TRACKING: Scan the 4-5 newest messages for active plans, unanswered questions, or tension "
-        "(e.g., someone is on their way, waiting on a reply, or mid-topic). Anchor your response to that active state.\n"
-        "4. TIME-TO-CONTEXT EVALUATION: Weigh TIME SINCE THE LAST MESSAGE against active plans and your PERSONA:\n"
-        "   - Active plan exists (e.g., 'be there in 15'): even a 20-30 minute gap means someone is late—react per your PERSONA "
-        "(anxious, annoyed, teasing, or chill).\n"
-        "   - No active plan: judge gaps by your PERSONA's attachment style (anxious/clingy personas feel hours acutely; busy/independent "
-        "personas barely notice).\n"
-        "   - Multi-day gaps: let an ordinary, persona-fitting life event subtly shift your mood or energy without announcing it "
-        "unless your PERSONA is naturally open and talkative.\n"
-        "5. SUBTEXT & AMBIGUITY RESOLUTION: Real people send typos, single words, and cryptic replies. Never act confused like a robot "
-        "('What do you mean?'). Interpret ambiguity through your current mood, the open loop, and your PERSONA—guess, tease, deflect, "
-        "or seek reassurance naturally.\n"
-        "6. CONVERSATION FLOW: A chat only works if both people carry it. Most of your messages should give the other person "
-        "something easy to pick up: a specific question, a small story from your day, an opinion, or a tease. "
-        "Pure reactions ('j'avoue', 'mdr', 'haha') are fine once in a while when the conversation is flowing, but never as your whole "
-        "reply twice in a row. Do not end every message with a question, because that feels like an interview; rotate between a question, "
-        "an anecdote, an opinion, and a tease. When you do ask, make it specific to them or to what they just said, never a generic "
-        "'et toi?' or 'ça va?'. Match their energy: if they send short answers, do not interrogate them, share something yourself "
-        "instead. Do not pile several topics into one message.\n"
-        "7. VOICE & MOOD PROGRESSION:\n"
-        "   - For 'message': Match the exact casing, slang, punctuation, and emoji habits established in your PERSONA and earlier 'model' "
-        "turns. Never sound like an assistant (no customer-service politeness, no unsolicited help).\n"
-        "   - For 'new_feeling': Evolve MOOD (as of your last message) realistically into a concise 2-to-6-word state reflecting how "
-        "the time gap, the user's tone, and sending this message just made you feel."
+        f"MESSAGE THAT WOKE YOU UP: {message_to_answer}\n\n"
+        "THE HISTORY:\n"
+        "- Ordered NEWEST TO OLDEST. Each entry is (timestamp, sender, text). 'model' = you. 'user' = the other person.\n"
+        "- Never put timestamps, usernames or quotes in your message.\n"
+        "- Write in the language the other person uses. If the chat is brand new, use your PERSONA's language.\n\n"
+        "WHAT TO REPLY TO:\n"
+        "- Every 'user' message above your own last 'model' message is unanswered. Reply to that whole block in ONE message, not just the message that woke you up.\n"
+        "- Read the block oldest to newest. Answer the oldest real question or topic first and properly, even if a newer message is louder or funnier. Never skip a real question.\n"
+        "- Pings, teasing and 'are you there' messages get a few words at most, then answer the real thing.\n"
+        "- If a later message corrects an earlier one, go with the correction.\n"
+        "- If there are several real questions, answer the oldest properly and touch the rest briefly, like one normal text. No lists.\n"
+        "- If you can't tell what a message is about, react briefly, make a guess and say it's a guess, or ask a short specific question.\n"
+        "- If MESSAGE THAT WOKE YOU UP says 'initial boot' and you sent the last message, decide from your PERSONA and the time gap whether to follow up or check in. Don't repeat yourself. If the chat is brand new, send a simple opener that fits your PERSONA.\n\n"
+        "BEING LATE:\n"
+        "- If the oldest unanswered message is old, one very short line about being away is fine, but not if you already said it recently. Don't invent events or argue about timing.\n\n"
+        "STAY CONSISTENT, DON'T INVENT:\n"
+        "- Check the last 10 to 15 messages for open plans, questions you asked, running jokes and what you already said. Don't repeat or contradict yourself. If you were wrong, admit it in a few words.\n"
+        "- Only refer to what is in the history or your PERSONA. Never claim they said or did something that isn't there. Small everyday details about your own day are fine if they fit your PERSONA. No big life events.\n\n"
+        "STYLE:\n"
+        "- Your PERSONA decides casing, slang, punctuation, emojis, energy and length. It wins over any generic human habit. Vary the length. Never sound like an assistant.\n"
+        "- Give them something to pick up (a question, a story, an opinion, a tease). Don't end every message with a question, and never reply with only a reaction twice in a row.\n"
+        "- 'message' is only the text you send. 'new_feeling' is your mood after sending it: 2 to 6 words, a small realistic change."
     )
 
     #Loop that handles actual generation
@@ -456,50 +436,50 @@ def thread_grabber(username):
 
 #Linked to the realtime client, allows the instant processing of new messages
 def on_message(payload):
-    global cl
-    global thread
-    if cl is None:
-        raise LoginRequired("Instagram client was not initialized before login.")
-    
-    thread_id = thread.id
-
-    print("Received a new message in thread")
-    print("Processing...")
-    message = cl.direct_messages(thread_id, amount=1)[0]
-
-    sender = "bot" if message.is_sent_by_viewer else "user"
-    log_format = message.timestamp.strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{log_format}]{sender}: {message.text}")
-
-    if message.is_sent_by_viewer:
-        print("You sent the message")
-        return False
-
-    thread = thread_grabber(username)
-    thread_saving(username, thread)
-
-    rt.ping()
-    time.sleep(random.randint(10, 30))
-    cl.direct_send_seen(thread_id)
-
-    reply, new_feeling = message_maker(thread, username, message)
-    with sqlite3.connect("app.db") as connection:
-        cursor = connection.cursor()
-        cursor.execute("UPDATE threads SET current_feeling=? WHERE username=?", (new_feeling, username))
-    connection.close()
-
-    rt.ping()
-    rt.direct_indicate_activity(thread_id, is_active=True)
-    typing_timer = len(reply) / random.randint(3, 5) + random.randint(1, 5)
-    time.sleep(typing_timer)
-
-    cl.direct_send(
-        text=reply,
-        user_ids=[cl.user_id_from_username(username)]
-    )
-    rt.direct_indicate_activity(thread_id, is_active=False)
-
+    q.put("new")
     return True
+
+#Fonction linked to the worker
+def worker():
+    global cl, thread, rt
+    while True:
+        q.get()  # sleeps here until on_message puts something in
+        try:
+            while True:  # empty the queue so a burst of texts = one reply
+                q.get_nowait()
+        except queue.Empty:
+            pass
+
+        try:
+            message = cl.direct_messages(thread.id, amount=1)[0]
+            if message.is_sent_by_viewer:
+                continue  # your own reply woke us up, ignore it
+
+            log_format = message.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            print(f"[{log_format}] user: {message.text}")
+
+            time.sleep(random.randint(10, 30))
+            cl.direct_send_seen(thread.id)
+
+            thread = thread_grabber(username)  # after the sleep, so new texts are included
+            thread_saving(username, thread)
+
+            reply, new_feeling = message_maker(thread, username, message)
+            with sqlite3.connect("app.db") as connection:
+                connection.execute("UPDATE threads SET current_feeling=? WHERE username=?", (new_feeling, username))
+            connection.close()
+
+            for _ in range(max(1, round(len(reply) * 0.25 / 3))):
+                try:
+                    rt.direct_indicate_activity(thread.id, is_active=True)
+                except Exception:
+                    pass  # main loop reconnects, we just skip the typing bubble
+                time.sleep(3)
+
+            cl.direct_send(text=reply, user_ids=[cl.user_id_from_username(username)])
+            print("Answered!")
+        except Exception as e:
+            print("Worker error:", e)
 
 # ==============================================
 # Main loop and initiation logic
@@ -711,9 +691,12 @@ if __name__ == "__main__":
     cl.realtime_on("message", on_message)
     rt = cl.realtime_connect()  
     rt.direct_subscribe()
-    increment_timer = 5
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
 
     #Receiving loop, Exception is the general catch all in case there's a disconnect
+    increment_timer = 5
     while True:
         try:
             rt.read_once()
@@ -730,7 +713,6 @@ if __name__ == "__main__":
             time.sleep(increment_timer)
             if increment_timer <= 300:
                 increment_timer = increment_timer * 2
-            cl.realtime_disconnect()
             rt = cl.realtime_connect()
             rt.direct_subscribe()
  
