@@ -632,7 +632,6 @@ if __name__ == "__main__":
         usernames.append(username)
         print(f"Will proceed with the initialization of a thread with {username}")
         thread = thread_grabber(username)
-        #There's an issue with thread.id as in it might not be the way to actually grab it or grab it correctly
 
         with sqlite3.connect("app.db") as connection:
             cursor = connection.cursor()
@@ -671,7 +670,6 @@ if __name__ == "__main__":
             thread = thread_grabber(username)
 
     #This is the part that finalizes the initialization before loading the main bot loop
-
     print(f"Activating bot for {username}")
     print("Loading thread for real time display...")
 
