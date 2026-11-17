@@ -459,7 +459,7 @@ def worker():
             thread = thread_grabber(username)  # after the sleep, so new texts are included
             thread_saving(username, thread)
 
-            reply, new_feeling = message_maker(thread, username, message)
+            reply, new_feeling = message_maker(thread, username, message.text)
             with sqlite3.connect("app.db") as connection:
                 connection.execute("UPDATE threads SET current_feeling=? WHERE username=?", (new_feeling, username))
             connection.close()
