@@ -274,7 +274,7 @@ def instagrapi_backin (username) -> bool:
         cl.set_device(old_settings["device_settings"])
         cl.set_user_agent(old_settings["user_agent"])
         if input("You need to login again as your session has expired. [1] to use password [2] to use a new session id: ") == "1":
-            password = input("You must input your username")
+            password = input("You must input your password")
             if not instagrapi_password_login(username, password):
                 print("Stopping program")
                 exit()
