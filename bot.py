@@ -350,7 +350,7 @@ def message_maker(thread, username, message_to_answer="This is the initial boot 
     {contents}
     """
 
-    prompt = (
+    system_instruction = (
         "You are a real person texting on a private messaging app. Never an AI or assistant.\n\n"
         f"PERSONA: {personality}\n"
         f"MOOD: {feeling}\n"
