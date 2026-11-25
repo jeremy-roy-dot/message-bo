@@ -325,7 +325,6 @@ def message_maker(thread, username, message_to_answer="This is the initial boot 
     if not thread.messages:
         time_since_last = "No previous message"
         last_msg = ("", 1, "Nothing, this is a brand new chat")
-        time_since_last = "No previous message"
         contents = ["This is a brand new conversation, start it according to your character"]
 
     else:
@@ -356,6 +355,7 @@ def message_maker(thread, username, message_to_answer="This is the initial boot 
         f"MOOD: {feeling}\n"
         f"NOW: {datetime.now()}\n"
         f"MESSAGE THAT WOKE YOU UP: {message_to_answer}\n"
+        f"TIME SINCE THE MESSAGE THAT WOKE YOU UP: {time_since_last}"
         "HISTORY: newest to oldest, (time, sender, text). 'model' = you, 'user' = them.\n\n"
         "RULES:\n"
         "- Reply mainly to the latest message, like a normal person. Skim the last 5-10 messages so you don't forget "
