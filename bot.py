@@ -222,7 +222,7 @@ def thread_remover ():
 
         thread_id = row[choice - 1][1]
         cursor.execute("DELETE FROM threads WHERE thread_id=?", (thread_id, ))
-        print(f"Successfully removed the thread with {username} from the db")
+        print(f"Successfully removed the thread with {row[choice - 1][0]} from the db")
         return True
 
 # ========================================================
